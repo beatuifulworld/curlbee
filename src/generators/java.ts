@@ -28,29 +28,11 @@ const supportedArgs = new Set([
 const doubleQuotes = (str: string): string => jsesc(str, { quotes: "double" });
 
 export const _toJava = (request: Request, warnings: Warnings = []): string => {
-  let javaCode = "";
-
-  if (request.auth) {
-    javaCode += "import javax.xml.bind.DatatypeConverter;\n";
-  }
-  javaCode += "import java.io.IOException;\n";
-  javaCode += "import java.io.InputStream;\n";
-  if (request.data) {
-    javaCode += "import java.io.OutputStreamWriter;\n";
-  }
-
-  javaCode += "import java.net.HttpURLConnection;\n";
-
-  javaCode += "import java.net.URL;\n";
-  javaCode += "import java.util.Scanner;\n";
-
-  javaCode += "\nclass Main {\n\n";
-
-  javaCode += "\tpublic static void main(String[] args) throws IOException {\n";
-  javaCode += '\t\tURL url = new URL("' + request.url + '");\n';
+  let javaCode = '//seed:{"crawl_link":"' + request.url + '"}\n';
+  //Header:
+  javaCode += "    def getHeader() {";
   javaCode +=
-    "\t\tHttpURLConnection httpConn = (HttpURLConnection) url.openConnection();\n";
-  javaCode += '\t\thttpConn.setRequestMethod("' + request.method + '");\n\n';
+      "\n        Map<String, String> header = new HashMap<String, String>();\n";
 
   let gzip = false;
   if (request.headers) {
@@ -59,64 +41,113 @@ export const _toJava = (request: Request, warnings: Warnings = []): string => {
         continue;
       }
       javaCode +=
-        '\t\thttpConn.setRequestProperty("' +
-        headerName +
-        '", "' +
-        doubleQuotes(headerValue) +
-        '");\n';
+          '        header.put("' +
+          headerName +
+          '", "' +
+          doubleQuotes(headerValue) +
+          '");\n';
       if (headerName.toLowerCase() === "accept-encoding" && headerValue) {
         gzip = headerValue.indexOf("gzip") !== -1;
       }
     }
-    javaCode += "\n";
+    javaCode += "\n        return header;\n}\n";
   }
 
-  if (request.auth) {
-    javaCode +=
-      '\t\tbyte[] message = ("' +
-      doubleQuotes(request.auth.join(":")) +
-      '").getBytes("UTF-8");\n';
-    javaCode +=
-      "\t\tString basicAuth = DatatypeConverter.printBase64Binary(message);\n";
-    javaCode +=
-      '\t\thttpConn.setRequestProperty("Authorization", "Basic " + basicAuth);\n';
-    javaCode += "\n";
-  }
-
-  if (request.data) {
-    request.data = doubleQuotes(request.data);
-    javaCode += "\t\thttpConn.setDoOutput(true);\n";
-    javaCode +=
-      "\t\tOutputStreamWriter writer = new OutputStreamWriter(httpConn.getOutputStream());\n";
-    javaCode += '\t\twriter.write("' + request.data + '");\n';
-    javaCode += "\t\twriter.flush();\n";
-    javaCode += "\t\twriter.close();\n";
-    javaCode += "\t\thttpConn.getOutputStream().close();\n";
-    javaCode += "\n";
-  }
-
+  //seed:
+  javaCode += `    /**
+     * 种子格式：
+     *{"crawl_link":"https://xxxxx"}  ss
+     */
+    @SeedProcessor
+    Request seedProcess(String seed) {
+            JSONObject jsonObject = JSONObject.parse(seed)
+            String url  = jsonObject.get('crawl_link')
+  `;
   javaCode +=
-    "\t\tInputStream responseStream = httpConn.getResponseCode() / 100 == 2\n";
-  javaCode += "\t\t\t\t? httpConn.getInputStream()\n";
-  javaCode += "\t\t\t\t: httpConn.getErrorStream();\n";
-  if (gzip) {
-    javaCode += '\t\tif ("gzip".equals(httpConn.getContentEncoding())) {\n';
-    javaCode += "\t\t\tresponseStream = new GZIPInputStream(responseStream);\n";
-    javaCode += "\t\t}\n";
-  }
-  javaCode +=
-    '\t\tScanner s = new Scanner(responseStream).useDelimiter("\\\\A");\n';
-  javaCode += '\t\tString response = s.hasNext() ? s.next() : "";\n';
-  javaCode += "\t\tSystem.out.println(response);\n";
+      "        Request request = new Request(url, HttpRequestMethod." +
+      request.method.toLowerCase() +
+      ", null, getHeader());\n";
+  javaCode += "        Map<String, String> map = new HashMap<>();\n";
+  javaCode += '        map.put("pageLevel", "seedProcess");\n';
+  javaCode += '        map.put("seed", seed);\n';
+  javaCode += "        request.setUrlContext(map);\n";
+  javaCode += "//        request.setUrlContext(map); 开启浏览器模式\n";
+  javaCode += "        return request;\n";
+  javaCode += "    }\n";
 
+  //parse
+  javaCode += "    @Override\n";
+  javaCode += `    Result parse(Page page) {
+          if (page.getPageEncode() == null) {
+            page.pageEncode = "utf-8";
+        }
+        Result result = new Result();
+        Map<String, String> extraMap = page?.request?.urlContext;
+
+        String pageLevel = extraMap.get("pageLevel");
+                if (pageLevel == null) {
+            pageLevel = "seedProcess";
+        }
+
+        switch (pageLevel) {
+        // 解析列表
+            case "seedProcess":
+                getRaw(page, result, extraMap);
+                break;
+                }
+        return result;
+    }\n
+        `;
+
+  // if (request.auth) {
+  //   javaCode +=
+  //     '\t\tbyte[] message = ("' +
+  //     doubleQuotes(request.auth.join(":")) +
+  //     '").getBytes("UTF-8");\n';
+  //   javaCode +=
+  //     "\t\tString basicAuth = DatatypeConverter.printBase64Binary(message);\n";
+  //   javaCode +=
+  //     '\t\thttpConn.setRequestProperty("Authorization", "Basic " + basicAuth);\n';
+  //   javaCode += "\n";
+  // }
+
+  // if (request.data) {
+  //   request.data = doubleQuotes(request.data);
+  //   javaCode += "\t\thttpConn.setDoOutput(true);\n";
+  //   javaCode +=
+  //     "\t\tOutputStreamWriter writer = new OutputStreamWriter(httpConn.getOutputStream());\n";
+  //   javaCode += '\t\twriter.write("' + request.data + '");\n';
+  //   javaCode += "\t\twriter.flush();\n";
+  //   javaCode += "\t\twriter.close();\n";
+  //   javaCode += "\t\thttpConn.getOutputStream().close();\n";
+  //   javaCode += "\n";
+  // }
+
+  //getRaw
+  javaCode += `    def getRaw(Page page, Result result, Map<String, String> extraMap) {
+        String page_str = page.rawPage
+        String seed=extraMap.get("seed")\n`;
+  javaCode += `            Map<String, String> map = new HashMap<>();
+            map.put(MyField.seed,extraMap)
+            map.put(MyField.rawpage, page_str);
+            result.addDataMap(map);
+            return
+           // map.put("level", level);\n
+`;
   javaCode += "\t}\n";
-  javaCode += "}";
-
+  javaCode += `    @FieldClass
+    static class MyField {
+        @Field(desc = "原始页面")
+        public static String rawpage = "rawpage";
+        @Field(desc = "种子")
+        public static String seed = "seed";
+    }
+`;
   return javaCode + "\n";
 };
 export const toJavaWarn = (
-  curlCommand: string | string[],
-  warnings: Warnings = []
+    curlCommand: string | string[],
+    warnings: Warnings = []
 ): [string, Warnings] => {
   const request = util.parseCurlCommand(curlCommand, supportedArgs, warnings);
   const java = _toJava(request, warnings);
